@@ -67,6 +67,7 @@
 | USE_PZEM_AC           | - | - | x | x | x | - | - |
 | USE_PZEM_DC           | - | - | x | x | x | - | - |
 | USE_MCP39F501         | - | x | x | x | x | - | - |
+| USE_SDM72             | - | - | - | - | x | - | - |
 | USE_SDM120            | - | - | - | - | x | - | - |
 | USE_SDM630            | - | - | - | - | x | - | - |
 | USE_DDS2382           | - | - | - | - | x | - | - |
@@ -149,6 +150,7 @@
 | USE_EZORGB            | - | - | - | - | - | - | - |
 | USE_EZORTD            | - | - | - | - | - | - | - |
 | USE_SEESAW_SOIL       | - | - | - | - | - | - | - |
+| USE_TOF10120          | - | - | - | - | - | - | - |
 |                       |   |   |   |   |   |   |   |
 | Feature or Sensor     | minimal | lite | tasmota | knx | sensors | ir | display | Remarks
 | USE_SPI               | - | - | - | - | - | - | x |
@@ -193,6 +195,7 @@
 | USE_RF_SENSOR         | - | - | - | - | x | - | - | AlectoV2 only
 | USE_HRE               | - | - | - | - | x | - | - |
 | USE_A4988_STEPPER     | - | - | - | - | - | - | - |
+| USE_NEOPOOL           | - | - | - | - | - | - | - |
 |                       |   |   |   |   |   |   |   |
 | Feature or Sensor     | minimal | lite | tasmota | knx | sensors | ir | display | Remarks
 | USE_DISPLAY           | - | - | - | - | - | - | x |
@@ -207,6 +210,7 @@
 | USE_DISPLAY_SSD1351   | - | - | - | - | - | - | x |
 | USE_DISPLAY_RA8876    | - | - | - | - | - | - | x |
 | USE_DISPLAY_ST7789    | - | - | - | - | - | - | x |
+| USE_DISPLAY_TM1637    | - | - | - | - | - | - | x |
 |                       |   |   |   |   |   |   |   |
 | USE_FT5206            | - | - | - | - | - | - | - |
 | USE_FTC532            | - | - | - | - | - | - | - |

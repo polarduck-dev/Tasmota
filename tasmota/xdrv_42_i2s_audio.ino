@@ -1,5 +1,5 @@
 /*
-  xdrv_42_i2s_audio.ino - audio dac support for Tasmota
+  xdrv_42_i2s_audio.ino - Audio dac support for Tasmota
 
   Copyright (C) 2021  Gerhard Mutz and Theo Arends
 
@@ -17,16 +17,39 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#if  (defined(USE_I2S_AUDIO) || defined(USE_TTGO_WATCH) || defined(USE_M5STACK_CORE2))
+#if (defined(USE_I2S_AUDIO) || defined(USE_TTGO_WATCH) || defined(USE_M5STACK_CORE2))
+/*********************************************************************************************\
+ * I2S support using an external DAC or a speaker connected to GPIO03 using a transistor
+ *
+ * Uses fixed GPIOs for ESP8266:
+ * I2S Out Data         GPIO03 (Rx)
+ * I2S Out Bit Clock    GPIO15
+ * I2S Out Word Select  GPIO02
+ * I2S In Data          GPIO12
+ * I2S In Bit Clock     GPIO13
+ * I2S In Word Select   GPIO14
+\*********************************************************************************************/
+
+#define XDRV_42           42
+
+#define USE_I2S_EXTERNAL_DAC   1
+//#define USE_I2S_NO_DAC                         // Add support for transistor-based output without DAC
+//#define USE_I2S_WEBRADIO                       // Add support for web radio
+//#define USE_I2S_SAY_TIME                       // Add support for english speaking clock
+
 #include "AudioFileSourcePROGMEM.h"
 #include "AudioFileSourceID3.h"
 #include "AudioGeneratorMP3.h"
-#include "AudioOutputI2S.h"
+#ifdef USE_I2S_NO_DAC
+  #include "AudioOutputI2SNoDAC.h"  // Transistor-driven lower quality connected to RX pin
+#else
+  #include "AudioOutputI2S.h"       // External I2S DAC IC
+#endif  // USE_I2S_NO_DAC
 #include <ESP8266SAM.h>
 #include "AudioFileSourceFS.h"
-#ifdef SAY_TIME
-#include "AudioGeneratorTalkie.h"
-#endif
+#ifdef USE_I2S_SAY_TIME
+  #include "AudioGeneratorTalkie.h"
+#endif  // USE_I2S_SAY_TIME
 #include "AudioFileSourceICYStream.h"
 #include "AudioFileSourceBuffer.h"
 #include "AudioGeneratorAAC.h"
@@ -41,7 +64,7 @@
 #undef AUDIO_PWR_OFF
 #define AUDIO_PWR_ON TTGO_audio_power(true);
 #define AUDIO_PWR_OFF TTGO_audio_power(false);
-#endif // USE_TTGO_WATCH
+#endif  // USE_TTGO_WATCH
 
 #ifdef USE_M5STACK_CORE2
 #undef AUDIO_PWR_ON
@@ -54,20 +77,18 @@
 #define DAC_IIS_BCK       12
 #define DAC_IIS_WS        0
 #define DAC_IIS_DOUT      2
-#endif // USE_M5STACK_CORE2
-
-
-#define EXTERNAL_DAC_PLAY   1
-
-#define XDRV_42           42
+#endif  // USE_M5STACK_CORE2
 
 AudioGeneratorMP3 *mp3 = nullptr;
 AudioFileSourceFS *file;
-AudioOutputI2S *out;
+#ifdef USE_I2S_NO_DAC
+  AudioOutputI2SNoDAC *out;
+#else
+  AudioOutputI2S *out;
+#endif  // USE_I2S_NO_DAC
 AudioFileSourceID3 *id3;
 AudioGeneratorMP3 *decoder = NULL;
 void *mp3ram = NULL;
-
 
 extern FS *ufsp;
 
@@ -81,7 +102,7 @@ const int preallocateCodecSize = 29192; // MP3 codec max mem needed
 //const int preallocateCodecSize = 85332; // AAC+SBR codec max mem needed
 #endif  // ESP32
 
-#ifdef USE_WEBRADIO
+#ifdef USE_I2S_WEBRADIO
 AudioFileSourceICYStream *ifile = NULL;
 AudioFileSourceBuffer *buff = NULL;
 char wr_title[64];
@@ -90,11 +111,11 @@ char wr_title[64];
 void *preallocateBuffer = NULL;
 void *preallocateCodec = NULL;
 uint32_t retryms = 0;
-#endif // USE_WEBRADIO
+#endif  // USE_I2S_WEBRADIO
 
-#ifdef SAY_TIME
+#ifdef USE_I2S_SAY_TIME
 AudioGeneratorTalkie *talkie = nullptr;
-#endif
+#endif  // USE_I2S_SAY_TIME
 
 //! MAX98357A + INMP441 DOUBLE I2S BOARD
 #ifdef ESP8266
@@ -111,26 +132,26 @@ AudioGeneratorTalkie *talkie = nullptr;
 #ifndef DAC_IIS_BCK
 #undef DAC_IIS_BCK
 #define DAC_IIS_BCK       26
-#endif
+#endif  // DAC_IIS_BCK
 
 #ifndef DAC_IIS_WS
 #undef DAC_IIS_WS
 #define DAC_IIS_WS        25
-#endif
+#endif  // DAC_IIS_WS
 
 #ifndef DAC_IIS_DOUT
 #undef DAC_IIS_DOUT
 #define DAC_IIS_DOUT      33
-#endif
+#endif  // DAC_IIS_DOUT
 
 #ifndef DAC_IIS_DIN
 #undef DAC_IIS_DIN
-#define DAC_IIS_DIN      34
-#endif
+#define DAC_IIS_DIN       34
+#endif  // DAC_IIS_DIN
 
 #endif  // ESP32
 
-#ifdef SAY_TIME
+#ifdef USE_I2S_SAY_TIME
 long timezone = 2;
 byte daysavetime = 1;
 
@@ -229,21 +250,29 @@ void sayTime(int hour, int minutes, AudioGeneratorTalkie *talkie) {
   out->stop();
   AUDIO_PWR_OFF
 }
-#endif
+#endif  // USE_I2S_SAY_TIME
 
 // should be in settings
 uint8_t is2_volume;
 
 void I2S_Init(void) {
 
-#if EXTERNAL_DAC_PLAY
-    out = new AudioOutputI2S();
+#if USE_I2S_EXTERNAL_DAC
+  #ifdef USE_I2S_NO_DAC
+  out = new AudioOutputI2SNoDAC();
+  #else
+  out = new AudioOutputI2S();
+  #endif  // USE_I2S_NO_DAC
 #ifdef ESP32
-    out->SetPinout(DAC_IIS_BCK, DAC_IIS_WS, DAC_IIS_DOUT);
+  out->SetPinout(DAC_IIS_BCK, DAC_IIS_WS, DAC_IIS_DOUT);
 #endif  // ESP32
 #else
-    out = new AudioOutputI2S(0, 1);
-#endif // EXTERNAL_DAC_PLAY
+  #ifdef USE_I2S_NO_DAC
+  out = new AudioOutputI2SNoDAC();
+  #else
+  out = new AudioOutputI2S(0, 1);    // Internal DAC port 0
+  #endif  // USE_I2S_NO_DAC
+#endif  // USE_I2S_EXTERNAL_DAC
 
   is2_volume=10;
   out->SetGain(((float)is2_volume/100.0)*4.0);
@@ -255,7 +284,7 @@ void I2S_Init(void) {
     mp3ram = heap_caps_malloc(preallocateCodecSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   }
 
-#ifdef USE_WEBRADIO
+#ifdef USE_I2S_WEBRADIO
   if (psramFound()) {
     preallocateBuffer = heap_caps_malloc(preallocateBufferSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     preallocateCodec = heap_caps_malloc(preallocateCodecSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -266,10 +295,9 @@ void I2S_Init(void) {
   if (!preallocateBuffer || !preallocateCodec) {
     //Serial.printf_P(PSTR("FATAL ERROR:  Unable to preallocate %d bytes for app\n"), preallocateBufferSize+preallocateCodecSize);
   }
-#endif // USE_WEBRADIO
-#endif // ESP32
+#endif  // USE_I2S_WEBRADIO
+#endif  // ESP32
 }
-
 
 
 #ifdef ESP32
@@ -379,10 +407,10 @@ uint32_t i2s_record(char *path, uint32_t secs) {
     if (data_offset >= mic_size-DATA_SIZE) break;
     delay(0);
   }
-  //AddLog_P(LOG_LEVEL_INFO, PSTR("rectime: %d ms"), millis()-stime);
+  //AddLog(LOG_LEVEL_INFO, PSTR("rectime: %d ms"), millis()-stime);
   SpeakerMic(MODE_SPK);
   // save to path
-  SaveWav(mic_path, mic_buff, mic_size);
+  SaveWav(path, mic_buff, mic_size);
   free(mic_buff);
   return 0;
 }
@@ -393,7 +421,8 @@ static const uint8_t wavHTemplate[] PROGMEM = { // Hardcoded simple WAV header w
     0x64, 0x61, 0x74, 0x61, 0xff, 0xff, 0xff, 0xff };
 
 bool SaveWav(char *path, uint8_t *buff, uint32_t size) {
-  File fwp = ufsp->open(path, FILE_WRITE);
+  File fwp = ufsp->open(path, "w");
+  if (!fwp) return false;
   uint8_t wavHeader[sizeof(wavHTemplate)];
   memcpy_P(wavHeader, wavHTemplate, sizeof(wavHTemplate));
 
@@ -425,7 +454,7 @@ bool SaveWav(char *path, uint8_t *buff, uint32_t size) {
   return true;
 }
 
-#endif // ESP32
+#endif  // ESP32
 
 #ifdef ESP32
 TaskHandle_t mp3_task_h;
@@ -446,9 +475,9 @@ void mp3_task(void *arg) {
     }
   }
 }
-#endif
+#endif  // ESP32
 
-#ifdef USE_WEBRADIO
+#ifdef USE_I2S_WEBRADIO
 void MDCallback(void *cbData, const char *type, bool isUnicode, const char *str) {
   const char *ptr = reinterpret_cast<const char *>(cbData);
   (void) isUnicode; // Punt this ball for now
@@ -456,7 +485,7 @@ void MDCallback(void *cbData, const char *type, bool isUnicode, const char *str)
   if (strstr_P(type, PSTR("Title"))) {
     strncpy(wr_title, str, sizeof(wr_title));
     wr_title[sizeof(wr_title)-1] = 0;
-    //AddLog_P(LOG_LEVEL_INFO,PSTR("WR-Title: %s"),wr_title);
+    //AddLog(LOG_LEVEL_INFO,PSTR("WR-Title: %s"),wr_title);
   } else {
     // Who knows what to do?  Not me!
   }
@@ -541,6 +570,23 @@ void Cmd_WebRadio(void) {
 
 }
 
+#ifdef USE_M5STACK_CORE2
+void Cmd_MicRec(void) {
+  if (XdrvMailbox.data_len > 0) {
+    uint16 time = 10;
+    char *cp = strchr(XdrvMailbox.data, ':');
+    if (cp) {
+      time = atoi(cp + 1);
+      *cp = 0;
+    }
+    if (time<10) time = 10;
+    if (time>30) time = 30;
+    i2s_record(XdrvMailbox.data, time);
+    ResponseCmndChar(XdrvMailbox.data);
+  }
+}
+#endif  // USE_M5STACK_CORE2
+
 const char HTTP_WEBRADIO[] PROGMEM =
    "{s}" "I2S_WR-Title" "{m}%s{e}";
 
@@ -550,11 +596,11 @@ void I2S_WR_Show(void) {
     }
 }
 
-#endif
+#endif  // USE_I2S_WEBRADIO
 
 #ifdef ESP32
 void Play_mp3(const char *path) {
-#if (defined(USE_SCRIPT_FATFS) && defined(USE_SCRIPT)) || defined(UFILESYSTEM)
+#if (defined(USE_SCRIPT_FATFS) && defined(USE_SCRIPT)) || defined(USE_UFILESYS)
   if (decoder || mp3) return;
   if (!out) return;
 
@@ -592,7 +638,7 @@ void Play_mp3(const char *path) {
     mp3_delete();
   }
 
-#endif // USE_SCRIPT
+#endif  // USE_SCRIPT
 }
 
 void mp3_delete(void) {
@@ -602,7 +648,7 @@ void mp3_delete(void) {
   mp3=nullptr;
   AUDIO_PWR_OFF
 }
-#endif // ESP32
+#endif  // ESP32
 
 void Say(char *text) {
 
@@ -624,20 +670,26 @@ const char kI2SAudio_Commands[] PROGMEM = "I2S|"
   "Say|Gain|Time"
 #ifdef ESP32
   "|Play"
-#ifdef USE_WEBRADIO
+#ifdef USE_I2S_WEBRADIO
   "|WR"
-#endif
-#endif
+#endif  // USE_I2S_WEBRADIO
+#ifdef USE_M5STACK_CORE2
+  "|REC"
+#endif  // USE_M5STACK_CORE2
+#endif  // ESP32
   ;
 
 void (* const I2SAudio_Command[])(void) PROGMEM = {
   &Cmd_Say, &Cmd_Gain, &Cmd_Time
 #ifdef ESP32
   ,&Cmd_Play
-#ifdef USE_WEBRADIO
+#ifdef USE_I2S_WEBRADIO
   ,&Cmd_WebRadio
-#endif
-#endif
+#endif // USE_I2S_WEBRADIO
+#ifdef USE_M5STACK_CORE2
+  ,&Cmd_MicRec
+#endif // USE_M5STACK_CORE2
+#endif // ESP32
 };
 
 
@@ -667,9 +719,9 @@ void Cmd_Say(void) {
 }
 
 void Cmd_Time(void) {
-#ifdef SAY_TIME
+#ifdef USE_I2S_SAY_TIME
   sayTime(RtcTime.hour, RtcTime.minute, talkie);
-#endif
+#endif  // USE_I2S_SAY_TIME
   ResponseCmndDone();
 }
 
@@ -688,12 +740,12 @@ bool Xdrv42(uint8_t function) {
       I2S_Init();
       break;
 #ifdef USE_WEBSERVER
-#ifdef USE_WEBRADIO
+#ifdef USE_I2S_WEBRADIO
     case FUNC_WEB_SENSOR:
       I2S_WR_Show();
       break;
-#endif
-#endif
+#endif  // USE_I2S_WEBRADIO
+#endif  // USE_WEBSERVER
   }
   return result;
 }
